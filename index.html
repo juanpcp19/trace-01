@@ -1,0 +1,1082 @@
+<title>TRACE 01 · Terrain to Vector</title>
+<style>
+  :root{
+    --bg:#0E0E0F; --panel:#151517; --panel2:#19191C; --line:#2A2A2E;
+    --ink:#F2F2F0; --ink-dim:#8A8A90; --ink-faint:#55555C;
+    --accent:#EF5F00;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--mono); font-size:12px; letter-spacing:0;
+    overflow:hidden;
+  }
+  /* ---------- shell ---------- */
+  .app{display:grid; grid-template-rows:52px 1fr; height:100vh}
+  header{
+    display:flex; align-items:center; gap:16px; padding:0 16px;
+    border-bottom:1px solid var(--line); background:var(--panel);
+  }
+  .brand{display:flex; align-items:baseline; gap:10px}
+  .brand .t{font-size:13px; font-weight:700}
+  .brand .s{color:var(--ink-dim); font-size:11px}
+  .brand .dot{width:8px;height:8px;background:var(--accent);display:inline-block;transform:translateY(-1px)}
+  header .spacer{flex:1}
+  .main{display:grid; grid-template-columns:296px 1fr; min-height:0}
+  aside{
+    border-right:1px solid var(--line); background:var(--panel);
+    overflow-y:auto; padding:14px 14px 28px;
+  }
+  .stage{
+    position:relative; display:flex; flex-direction:column; min-width:0; min-height:0;
+    background:
+      linear-gradient(var(--panel2) 1px, transparent 1px) 0 0/100% 28px,
+      linear-gradient(90deg, var(--panel2) 1px, transparent 1px) 0 0/28px 100%,
+      var(--bg);
+  }
+  .board{
+    flex:1; display:flex; align-items:center; justify-content:center;
+    padding:32px; min-height:0;
+  }
+  .board .frame{position:relative; max-width:100%; max-height:100%; line-height:0;
+    box-shadow:0 0 0 1px var(--line), 0 24px 60px rgba(0,0,0,.55)}
+  .board .frame img.ghost{
+    position:absolute; inset:0; width:100%; height:100%; object-fit:fill;
+    opacity:.18; pointer-events:none;
+  }
+  .board svg{max-width:100%; max-height:calc(100vh - 52px - 40px - 64px); width:auto; height:auto; display:block}
+  .statusbar{
+    display:flex; gap:20px; align-items:center; height:40px; padding:0 16px;
+    border-top:1px solid var(--line); background:var(--panel);
+    color:var(--ink-dim); font-size:11px; white-space:nowrap; overflow:hidden;
+  }
+  .statusbar b{color:var(--ink); font-weight:400}
+  /* ---------- controls ---------- */
+  .sec{border-bottom:1px solid var(--line); padding:14px 0}
+  .sec:first-child{padding-top:2px}
+  .sec:last-child{border-bottom:0}
+  .sec h2{
+    margin:0 0 12px; font-size:10px; font-weight:700; color:var(--ink-dim);
+    text-transform:uppercase; letter-spacing:0;
+  }
+  .row{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px}
+  .row:last-child{margin-bottom:0}
+  .lbl{color:var(--ink); text-transform:uppercase; font-size:11px}
+  .val{color:var(--ink-dim); font-variant-numeric:tabular-nums; font-size:11px}
+  .slider{margin:-2px 0 12px}
+  input[type=range]{
+    -webkit-appearance:none; appearance:none; width:100%; height:16px; background:transparent; margin:0; display:block; cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track{height:2px; background:var(--line)}
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:10px; height:10px; margin-top:-4px;
+    background:var(--ink); border:none;
+  }
+  input[type=range]:hover::-webkit-slider-thumb,
+  input[type=range]:focus-visible::-webkit-slider-thumb{background:var(--accent)}
+  input[type=range]::-moz-range-track{height:2px; background:var(--line)}
+  input[type=range]::-moz-range-thumb{width:10px;height:10px;border:none;border-radius:0;background:var(--ink)}
+  input[type=range]:hover::-moz-range-thumb{background:var(--accent)}
+  input[type=range]:focus-visible{outline:1px solid var(--accent); outline-offset:4px}
+  .seg{display:flex; border:1px solid var(--line); margin-bottom:12px}
+  .seg button{
+    flex:1; background:transparent; color:var(--ink-dim); border:0; border-right:1px solid var(--line);
+    font:inherit; font-size:10px; text-transform:uppercase; padding:7px 2px; cursor:pointer; letter-spacing:0;
+  }
+  .seg button:last-child{border-right:0}
+  .seg.modes{display:grid; grid-template-columns:repeat(6,1fr)}
+  .seg.modes button{border-right:1px solid var(--line)}
+  .seg.modes button:nth-child(-n+3){grid-column:span 2; border-bottom:1px solid var(--line)}
+  .seg.modes button:nth-child(3){border-right:0}
+  .seg.modes button:nth-child(n+4){grid-column:span 3}
+  .seg.modes button:nth-child(5){border-right:0}
+  .seg button[aria-pressed=true]{background:var(--ink); color:#0B0B0C; font-weight:700}
+  .seg button:focus-visible{outline:1px solid var(--accent); outline-offset:-1px}
+  .toggle{display:flex; align-items:center; gap:9px; cursor:pointer; user-select:none; padding:3px 0}
+  .toggle input{position:absolute; opacity:0; width:0; height:0}
+  .toggle .box{
+    width:12px; height:12px; border:1px solid var(--ink-dim); flex:none; position:relative;
+  }
+  .toggle input:checked + .box{border-color:var(--accent); background:var(--accent)}
+  .toggle input:checked + .box::after{
+    content:""; position:absolute; inset:2px; background:#0B0B0C;
+  }
+  .toggle input:focus-visible + .box{outline:1px solid var(--accent); outline-offset:2px}
+  .toggle .lbl{font-size:11px}
+  .btn{
+    display:block; width:100%; text-align:center; background:transparent; color:var(--ink);
+    border:1px solid var(--line); font:inherit; font-size:11px; text-transform:uppercase;
+    padding:9px 8px; cursor:pointer; margin-bottom:8px; letter-spacing:0;
+  }
+  .btn:hover{border-color:var(--ink); background:var(--panel2)}
+  .btn:focus-visible{outline:1px solid var(--accent); outline-offset:2px}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:#0B0B0C; font-weight:700}
+  .btn.primary:hover{background:#FF7A1F; border-color:#FF7A1F}
+  .btn:disabled{opacity:.4; cursor:default}
+  .hint{color:var(--ink-faint); font-size:10px; line-height:1.6; margin:8px 0 0}
+  .filelabel{color:var(--ink-dim); font-size:10px; margin-top:6px; word-break:break-all}
+  /* ---------- drop overlay ---------- */
+  .dropzone{
+    position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(14,14,15,.86); z-index:50; pointer-events:none;
+  }
+  .dropzone.on{display:flex}
+  .dropzone .inner{
+    border:1px dashed var(--accent); color:var(--accent); padding:40px 64px;
+    font-size:13px; text-transform:uppercase;
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .btn,.seg button{transition:background .12s,border-color .12s,color .12s}
+  }
+</style>
+
+<div class="app">
+  <header>
+    <div class="brand">
+      <span class="dot"></span>
+      <span class="t">TRACE 01</span>
+      <span class="s">TERRAIN / VECTOR INSTRUMENT</span>
+    </div>
+    <div class="spacer"></div>
+    <span class="s" style="color:var(--ink-faint);font-size:10px">DROP OR PASTE AN IMAGE ANYWHERE</span>
+  </header>
+
+  <div class="main">
+    <aside>
+      <div class="sec">
+        <h2>Source</h2>
+        <button class="btn" id="btnLoad">Load image</button>
+        <button class="btn" id="btnDemo">Demo scene</button>
+        <input type="file" id="fileInput" accept="image/*" hidden>
+        <div class="filelabel" id="srcName">SRC: demo-scene-01</div>
+      </div>
+
+      <div class="sec">
+        <h2>Mode</h2>
+        <div class="seg modes" id="segMode">
+          <button data-v="trace" aria-pressed="true">Trace</button>
+          <button data-v="wireframe" aria-pressed="false">Wireframe</button>
+          <button data-v="contours" aria-pressed="false">Contours</button>
+          <button data-v="ridgelines" aria-pressed="false">Ridgelines</button>
+          <button data-v="wave" aria-pressed="false">Soundwave</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <h2>Extraction</h2>
+        <div class="seg" id="segAlgo">
+          <button data-v="color" aria-pressed="true">Auto color</button>
+          <button data-v="luma" aria-pressed="false">Luminance</button>
+        </div>
+        <div class="row"><span class="lbl">Threshold</span><span class="val" id="vThreshold">30</span></div>
+        <div class="slider"><input type="range" id="threshold" min="6" max="90" value="30"></div>
+        <div class="row"><span class="lbl">Smoothing</span><span class="val" id="vSmooth">3</span></div>
+        <div class="slider"><input type="range" id="smooth" min="0" max="12" value="3"></div>
+        <label class="toggle"><input type="checkbox" id="invert"><span class="box"></span><span class="lbl">Invert (dark sky)</span></label>
+        <label class="toggle"><input type="checkbox" id="maskSky" checked><span class="box"></span><span class="lbl">Mask sky</span></label>
+      </div>
+
+      <div class="sec" id="pTrace">
+        <h2>Trace</h2>
+        <div class="row"><span class="lbl">Density</span><span class="val" id="vDensity">5</span></div>
+        <div class="slider"><input type="range" id="density" min="1" max="10" value="5"></div>
+        <div class="row"><span class="lbl">Min fragment</span><span class="val" id="vMinFrag">8</span></div>
+        <div class="slider"><input type="range" id="minFrag" min="2" max="40" value="8"></div>
+      </div>
+
+      <div class="sec" id="pWire" hidden>
+        <h2>Wireframe</h2>
+        <div class="row"><span class="lbl">Spacing</span><span class="val" id="vSpacing">14</span></div>
+        <div class="slider"><input type="range" id="spacing" min="6" max="32" value="14"></div>
+        <div class="row"><span class="lbl">Relief</span><span class="val" id="vRelief">30</span></div>
+        <div class="slider"><input type="range" id="relief" min="0" max="60" value="30"></div>
+      </div>
+
+      <div class="sec" id="pContours" hidden>
+        <h2>Contours</h2>
+        <div class="row"><span class="lbl">Levels</span><span class="val" id="vLevels">12</span></div>
+        <div class="slider"><input type="range" id="levels" min="4" max="28" value="12"></div>
+        <div class="row"><span class="lbl">Detail</span><span class="val" id="vDetail">6</span></div>
+        <div class="slider"><input type="range" id="detail" min="1" max="12" value="6"></div>
+      </div>
+
+      <div class="sec" id="pRidgelines" hidden>
+        <h2>Ridgelines</h2>
+        <div class="row"><span class="lbl">Count</span><span class="val" id="vCount">18</span></div>
+        <div class="slider"><input type="range" id="count" min="4" max="60" value="18"></div>
+        <div class="row"><span class="lbl">Decay</span><span class="val" id="vDecay">1.6</span></div>
+        <div class="slider"><input type="range" id="decay" min="5" max="30" value="16"></div>
+      </div>
+
+      <div class="sec" id="pWave" hidden>
+        <h2>Soundwave</h2>
+        <div class="seg" id="segWaveStyle">
+          <button data-v="bars" aria-pressed="true">Bars</button>
+          <button data-v="line" aria-pressed="false">Line</button>
+        </div>
+        <div class="row"><span class="lbl">Samples</span><span class="val" id="vSamples">140</span></div>
+        <div class="slider"><input type="range" id="samples" min="24" max="360" value="140"></div>
+        <div class="row"><span class="lbl">Gap</span><span class="val" id="vGap">35</span></div>
+        <div class="slider"><input type="range" id="gap" min="0" max="70" value="35"></div>
+      </div>
+
+      <div class="sec">
+        <h2>Style</h2>
+        <div class="seg" id="segScheme">
+          <button data-v="light" aria-pressed="false">Light</button>
+          <button data-v="dark" aria-pressed="false">Dark</button>
+          <button data-v="blueprint" aria-pressed="true">Blueprint</button>
+        </div>
+        <div class="row"><span class="lbl">Stroke</span><span class="val" id="vStroke">1.2</span></div>
+        <div class="slider"><input type="range" id="stroke" min="4" max="36" value="12"></div>
+        <label class="toggle"><input type="checkbox" id="accentOn"><span class="box"></span><span class="lbl">Orange accent</span></label>
+        <label class="toggle"><input type="checkbox" id="gridOn" checked><span class="box"></span><span class="lbl">Grid</span></label>
+        <label class="toggle"><input type="checkbox" id="ghostOn"><span class="box"></span><span class="lbl">Ghost source (preview)</span></label>
+        <label class="toggle"><input type="checkbox" id="specOn"><span class="box"></span><span class="lbl">Spec label</span></label>
+      </div>
+
+      <div class="sec">
+        <h2>Export</h2>
+        <button class="btn primary" id="btnSvg">Export SVG</button>
+        <button class="btn" id="btnPng">Export PNG 2×</button>
+        <p class="hint">SVG is native vector paths, no filters. Drop the file straight into Figma.</p>
+      </div>
+    </aside>
+
+    <div class="stage">
+      <div class="board"><div class="frame" id="frame"></div></div>
+      <div class="statusbar" id="statusbar"></div>
+    </div>
+  </div>
+</div>
+
+<div class="dropzone" id="dropzone"><div class="inner">Drop image to trace</div></div>
+
+<script>
+/*CORE-START*/
+"use strict";
+
+function toLuminance(rgba, w, h){
+  const out = new Float32Array(w*h);
+  for(let i=0, p=0; i<w*h; i++, p+=4){
+    out[i] = 0.2126*rgba[p] + 0.7152*rgba[p+1] + 0.0722*rgba[p+2];
+  }
+  return out;
+}
+
+function boxBlurField(src, w, h, r){
+  if(r<1) return src.slice();
+  const tmp = new Float32Array(w*h), out = new Float32Array(w*h);
+  for(let y=0; y<h; y++){
+    let acc=0; const row=y*w;
+    for(let x=-r; x<=r; x++) acc += src[row + Math.min(w-1, Math.max(0,x))];
+    const n = 2*r+1;
+    for(let x=0; x<w; x++){
+      tmp[row+x] = acc/n;
+      const xin = Math.min(w-1, x+r+1), xout = Math.max(0, x-r);
+      acc += src[row+xin] - src[row+xout];
+    }
+  }
+  for(let x=0; x<w; x++){
+    let acc=0;
+    for(let y=-r; y<=r; y++) acc += tmp[Math.min(h-1, Math.max(0,y))*w + x];
+    const n = 2*r+1;
+    for(let y=0; y<h; y++){
+      out[y*w+x] = acc/n;
+      const yin = Math.min(h-1, y+r+1), yout = Math.max(0, y-r);
+      acc += tmp[yin*w+x] - tmp[yout*w+x];
+    }
+  }
+  return out;
+}
+
+function sobelMag(field, w, h){
+  const out = new Float32Array(w*h);
+  for(let y=1; y<h-1; y++){
+    for(let x=1; x<w-1; x++){
+      const i = y*w+x;
+      const gx = (field[i-w+1] + 2*field[i+1] + field[i+w+1]) - (field[i-w-1] + 2*field[i-1] + field[i+w-1]);
+      const gy = (field[i+w-1] + 2*field[i+w] + field[i+w+1]) - (field[i-w-1] + 2*field[i-w] + field[i-w+1]);
+      out[i] = Math.abs(gx) + Math.abs(gy);
+    }
+  }
+  return out;
+}
+
+// Adaptive per-column sky reference walk. Returns y of first non-sky pixel per column (NaN if none).
+function extractSkylineColor(rgba, w, h, threshold, run){
+  const prof = new Float32Array(w).fill(NaN);
+  const maxY = h-1;
+  for(let x=0; x<w; x++){
+    let rr = rgba[x*4], rg = rgba[x*4+1], rb = rgba[x*4+2];
+    for(let y=1; y<=maxY; y++){
+      const p = (y*w+x)*4;
+      const d = (Math.abs(rgba[p]-rr) + Math.abs(rgba[p+1]-rg) + Math.abs(rgba[p+2]-rb))/3;
+      if(d < threshold){
+        rr += (rgba[p]-rr)*0.08; rg += (rgba[p+1]-rg)*0.08; rb += (rgba[p+2]-rb)*0.08;
+        continue;
+      }
+      let ok = true;
+      for(let k=1; k<=run && y+k<=maxY; k++){
+        const q = ((y+k)*w+x)*4;
+        const dk = (Math.abs(rgba[q]-rr) + Math.abs(rgba[q+1]-rg) + Math.abs(rgba[q+2]-rb))/3;
+        if(dk < threshold*0.8){ ok=false; break; }
+      }
+      if(ok){ prof[x] = y; break; }
+    }
+  }
+  return prof;
+}
+
+function extractSkylineLuma(lum, w, h, cut01, run, invert){
+  let lo=255, hi=0;
+  for(let i=0;i<lum.length;i++){ if(lum[i]<lo)lo=lum[i]; if(lum[i]>hi)hi=lum[i]; }
+  const cut = lo + (hi-lo)*cut01;
+  const isSky = invert ? (v)=>v<=cut : (v)=>v>=cut;
+  const prof = new Float32Array(w).fill(NaN);
+  for(let x=0; x<w; x++){
+    for(let y=0; y<h; y++){
+      if(!isSky(lum[y*w+x])){
+        let ok = true;
+        for(let k=1; k<=run && y+k<h; k++){ if(isSky(lum[(y+k)*w+x])){ ok=false; break; } }
+        if(ok){ prof[x]=y; break; }
+      }
+    }
+  }
+  return prof;
+}
+
+function fillGaps(prof){
+  const n = prof.length, out = prof.slice();
+  let first=-1;
+  for(let i=0;i<n;i++){ if(!Number.isNaN(out[i])){ first=i; break; } }
+  if(first<0){ out.fill(0); return out; }
+  for(let i=0;i<first;i++) out[i]=out[first];
+  let last=first;
+  for(let i=first+1;i<n;i++){
+    if(Number.isNaN(out[i])) continue;
+    if(i-last>1){
+      for(let j=last+1;j<i;j++) out[j] = out[last] + (out[i]-out[last])*(j-last)/(i-last);
+    }
+    last=i;
+  }
+  for(let i=last+1;i<n;i++) out[i]=out[last];
+  return out;
+}
+
+function medianFilter(arr, win){
+  if(win<3) return arr.slice();
+  const half = win>>1, n = arr.length, out = new Float32Array(n);
+  const buf = [];
+  for(let i=0;i<n;i++){
+    buf.length = 0;
+    for(let k=-half;k<=half;k++) buf.push(arr[Math.min(n-1,Math.max(0,i+k))]);
+    buf.sort((a,b)=>a-b);
+    out[i] = buf[half];
+  }
+  return out;
+}
+
+function smooth1d(arr, win){
+  if(win<2) return arr.slice();
+  const half = win>>1, n = arr.length, out = new Float32Array(n);
+  for(let i=0;i<n;i++){
+    let acc=0, cnt=0;
+    for(let k=-half;k<=half;k++){
+      const j=i+k; if(j<0||j>=n) continue;
+      acc+=arr[j]; cnt++;
+    }
+    out[i]=acc/cnt;
+  }
+  return out;
+}
+
+function resampleProfile(arr, n){
+  const m = arr.length, out = new Float32Array(n);
+  if(n===1){ out[0]=arr[0]; return out; }
+  for(let i=0;i<n;i++){
+    const t = i*(m-1)/(n-1), j = Math.floor(t), f = t-j;
+    out[i] = j+1<m ? arr[j]*(1-f)+arr[j+1]*f : arr[j];
+  }
+  return out;
+}
+
+// Marching squares: returns flat segment list [x1,y1,x2,y2,...] at given level.
+function marchingSquares(field, w, h, level){
+  const segs = [];
+  // clamp away from corners so no two edge points coincide at a grid vertex,
+  // which would create >2-way junctions and break chaining
+  const T = (a,b)=> Math.min(1-1e-4, Math.max(1e-4, (level-a)/(b-a)));
+  for(let y=0; y<h-1; y++){
+    for(let x=0; x<w-1; x++){
+      const a = field[y*w+x],       b = field[y*w+x+1];
+      const c = field[(y+1)*w+x+1], d = field[(y+1)*w+x];
+      let idx = 0;
+      if(a>level) idx|=8; if(b>level) idx|=4; if(c>level) idx|=2; if(d>level) idx|=1;
+      if(idx===0||idx===15) continue;
+      const top    = [x+T(a,b), y];
+      const right  = [x+1, y+T(b,c)];
+      const bottom = [x+T(d,c), y+1];
+      const left   = [x, y+T(a,d)];
+      const put = (p,q)=>{
+        if(Math.abs(p[0]-q[0]) + Math.abs(p[1]-q[1]) < 1e-3) return; // degenerate corner hit
+        segs.push(p[0],p[1],q[0],q[1]);
+      };
+      switch(idx){
+        case 1: case 14: put(left,bottom); break;
+        case 2: case 13: put(bottom,right); break;
+        case 3: case 12: put(left,right); break;
+        case 4: case 11: put(top,right); break;
+        case 6: case 9:  put(top,bottom); break;
+        case 7: case 8:  put(left,top); break;
+        case 5:{
+          const ctr = (a+b+c+d)/4;
+          if(ctr>level){ put(left,top); put(bottom,right); }
+          else{ put(left,bottom); put(top,right); }
+          break;
+        }
+        case 10:{
+          const ctr = (a+b+c+d)/4;
+          if(ctr>level){ put(top,right); put(left,bottom); }
+          else{ put(left,top); put(bottom,right); }
+          break;
+        }
+      }
+    }
+  }
+  return segs;
+}
+
+// Chain loose segments into polylines. segs = flat [x1,y1,x2,y2,...].
+function chainSegments(segs){
+  const nseg = segs.length/4;
+  const key = (x,y)=> (Math.round(x*16)+32768)*131072 + (Math.round(y*16)+32768);
+  const map = new Map();
+  for(let i=0;i<nseg;i++){
+    const k1 = key(segs[i*4], segs[i*4+1]), k2 = key(segs[i*4+2], segs[i*4+3]);
+    let a1 = map.get(k1); if(!a1){ a1=[]; map.set(k1,a1); } a1.push(i,0);
+    let a2 = map.get(k2); if(!a2){ a2=[]; map.set(k2,a2); } a2.push(i,1);
+  }
+  const used = new Uint8Array(nseg);
+  const polys = [];
+  for(let s=0;s<nseg;s++){
+    if(used[s]) continue;
+    used[s]=1;
+    const pts = [segs[s*4],segs[s*4+1],segs[s*4+2],segs[s*4+3]];
+    for(const dir of [1,0]){
+      for(;;){
+        const px = dir? pts[pts.length-2] : pts[0];
+        const py = dir? pts[pts.length-1] : pts[1];
+        const cands = map.get(key(px,py));
+        let found = -1, fEnd = 0;
+        if(cands) for(let c=0;c<cands.length;c+=2){
+          if(!used[cands[c]]){ found=cands[c]; fEnd=cands[c+1]; break; }
+        }
+        if(found<0) break;
+        used[found]=1;
+        const ox = fEnd? segs[found*4]   : segs[found*4+2];
+        const oy = fEnd? segs[found*4+1] : segs[found*4+3];
+        if(dir){ pts.push(ox,oy); } else { pts.unshift(ox,oy); }
+      }
+    }
+    polys.push(pts);
+  }
+  return polys;
+}
+
+// Ramer-Douglas-Peucker on flat [x,y,...] array.
+function rdp(pts, eps){
+  const n = pts.length/2;
+  if(n<3) return pts.slice();
+  const keep = new Uint8Array(n); keep[0]=1; keep[n-1]=1;
+  const stack = [[0,n-1]];
+  while(stack.length){
+    const [i0,i1] = stack.pop();
+    const x0=pts[i0*2], y0=pts[i0*2+1], x1=pts[i1*2], y1=pts[i1*2+1];
+    const dx=x1-x0, dy=y1-y0, len=Math.hypot(dx,dy);
+    const degenerate = len < 1e-6; // closed loop: baseline collapses, use distance to endpoint
+    let maxD=-1, maxI=-1;
+    for(let i=i0+1;i<i1;i++){
+      const d = degenerate
+        ? Math.hypot(pts[i*2]-x0, pts[i*2+1]-y0)
+        : Math.abs(dx*(y0-pts[i*2+1]) - (x0-pts[i*2])*dy)/len;
+      if(d>maxD){ maxD=d; maxI=i; }
+    }
+    if(maxD>eps){ keep[maxI]=1; stack.push([i0,maxI],[maxI,i1]); }
+  }
+  const out=[];
+  for(let i=0;i<n;i++) if(keep[i]) out.push(pts[i*2],pts[i*2+1]);
+  return out;
+}
+
+function polyLength(pts){
+  let L=0;
+  for(let i=1;i<pts.length/2;i++) L += Math.hypot(pts[i*2]-pts[i*2-2], pts[i*2+1]-pts[i*2-1]);
+  return L;
+}
+
+// Split a polyline, keeping only runs below the skyline profile (y >= prof[x] + margin).
+function clipBelowProfile(pts, prof, margin){
+  const n = pts.length/2, out=[];
+  let cur=null;
+  for(let i=0;i<n;i++){
+    const x=pts[i*2], y=pts[i*2+1];
+    const xi = Math.min(prof.length-1, Math.max(0, Math.round(x)));
+    if(y >= prof[xi]+margin){
+      if(!cur) cur=[];
+      cur.push(x,y);
+    }else if(cur){
+      if(cur.length>=4) out.push(cur);
+      cur=null;
+    }
+  }
+  if(cur && cur.length>=4) out.push(cur);
+  return out;
+}
+
+// Percentile-spaced contour levels from the (optionally masked) region.
+function contourLevels(field, w, h, prof, k, maskSky){
+  const vals=[];
+  const step = Math.max(1, Math.floor(Math.sqrt(w*h/20000)));
+  for(let y=0;y<h;y+=step){
+    for(let x=0;x<w;x+=step){
+      if(maskSky && y < prof[x]) continue;
+      vals.push(field[y*w+x]);
+    }
+  }
+  vals.sort((a,b)=>a-b);
+  if(!vals.length) return [];
+  const out=[];
+  for(let i=0;i<k;i++){
+    const q = (i+1)/(k+1);
+    out.push(vals[Math.min(vals.length-1, Math.floor(q*vals.length))]);
+  }
+  return out.filter((v,i)=> i===0 || v-out[i-1] > 1e-4);
+}
+
+function fieldPercentile(field, w, h, prof, maskSky, q){
+  const vals=[];
+  const step = Math.max(1, Math.floor(Math.sqrt(w*h/20000)));
+  for(let y=0;y<h;y+=step){
+    for(let x=0;x<w;x+=step){
+      if(maskSky && y < prof[x]) continue;
+      vals.push(field[y*w+x]);
+    }
+  }
+  vals.sort((a,b)=>a-b);
+  if(!vals.length) return 0;
+  return vals[Math.min(vals.length-1, Math.floor(q*vals.length))];
+}
+
+function buildRidgelines(prof, baseY, count, decay){
+  const lines=[];
+  for(let k=0;k<count;k++){
+    const t = count===1 ? 0 : k/(count-1);
+    const f = Math.pow(1-t, decay);
+    const line = new Float32Array(prof.length);
+    for(let x=0;x<prof.length;x++) line[x] = baseY - (baseY - prof[x])*f;
+    lines.push(line);
+  }
+  return lines;
+}
+
+function mulberry32(seed){
+  return function(){
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed>>>15, 1|seed);
+    t = t + Math.imul(t ^ t>>>7, 61|t) ^ t;
+    return ((t ^ t>>>14)>>>0)/4294967296;
+  };
+}
+
+function valueNoise1d(n, octaves, rnd){
+  const out = new Float32Array(n);
+  let amp=1, freq=4, total=0;
+  for(let o=0;o<octaves;o++){
+    const grid=[]; for(let i=0;i<=freq;i++) grid.push(rnd()*2-1);
+    for(let i=0;i<n;i++){
+      const t=i/(n-1)*freq, j=Math.min(freq-1,Math.floor(t)), f=t-j;
+      const s=f*f*(3-2*f);
+      out[i]+= (grid[j]*(1-s)+grid[j+1]*s)*amp;
+    }
+    total+=amp; amp*=0.5; freq*=2;
+  }
+  for(let i=0;i<n;i++) out[i]/=total;
+  return out;
+}
+/*CORE-END*/
+
+/*PIPELINE-START*/
+const MAXW = 1080, CONTW = 760;
+
+const state = {
+  mode:'trace', algo:'color', scheme:'blueprint', waveStyle:'bars',
+  threshold:30, smooth:3, invert:false, maskSky:true,
+  density:5, minFrag:8,
+  spacing:14, relief:30,
+  levels:12, detail:6,
+  count:18, decay:1.6,
+  samples:140, gap:0.35,
+  stroke:1.2, accentOn:false, gridOn:true, ghostOn:false, specOn:false,
+  srcName:'demo-scene-01',
+};
+
+const SCHEMES = {
+  light:     { bg:'#FFFFFF', ink:'#111113', grid:'rgba(17,17,19,0.10)' },
+  dark:      { bg:'#0B0B0C', ink:'#F4F4F2', grid:'rgba(244,244,242,0.10)' },
+  blueprint: { bg:'#2D4FA1', ink:'#F2F6FC', grid:'rgba(242,246,252,0.20)' },
+};
+const ACCENT = '#EF5F00';
+
+let img = { w:0, h:0, rgba:null, dataURL:null };
+let cache = { profile:null, fields:{}, smallLum:null, traceField:null, cw:0, ch:0 };
+let svgString = '';
+
+function invalidateImage(){ cache = { profile:null, fields:{}, smallLum:null, traceField:null, cw:0, ch:0 }; }
+function invalidateProfile(){ cache.profile = null; }
+
+function getProfile(){
+  if(cache.profile) return cache.profile;
+  let prof;
+  if(state.algo==='color'){
+    prof = extractSkylineColor(img.rgba, img.w, img.h, state.threshold, 4);
+  }else{
+    const lum = toLuminance(img.rgba, img.w, img.h);
+    prof = extractSkylineLuma(lum, img.w, img.h, state.threshold/100, 4, state.invert);
+  }
+  prof = fillGaps(prof);
+  if(state.smooth>0){
+    prof = medianFilter(prof, 1+2*Math.round(state.smooth/2));
+    prof = smooth1d(prof, 1+2*state.smooth);
+  }
+  cache.profile = prof;
+  return prof;
+}
+
+function getSmallLum(){
+  if(cache.smallLum) return cache.smallLum;
+  const s = Math.min(1, CONTW/img.w);
+  const cw = Math.max(2,Math.round(img.w*s)), ch = Math.max(2,Math.round(img.h*s));
+  const lum = toLuminance(img.rgba, img.w, img.h);
+  const small = new Float32Array(cw*ch);
+  for(let y=0;y<ch;y++){
+    const sy = Math.min(img.h-1, Math.round(y/s));
+    for(let x=0;x<cw;x++){
+      small[y*cw+x] = lum[sy*img.w + Math.min(img.w-1, Math.round(x/s))];
+    }
+  }
+  cache.smallLum = small; cache.cw = cw; cache.ch = ch;
+  return small;
+}
+
+function getBlurField(r){
+  if(cache.fields[r]) return cache.fields[r];
+  const small = getSmallLum();
+  const f = boxBlurField(small, cache.cw, cache.ch, r);
+  cache.fields[r] = f;
+  return f;
+}
+
+function getTraceField(){
+  if(cache.traceField) return cache.traceField;
+  const base = getBlurField(1);
+  cache.traceField = sobelMag(base, cache.cw, cache.ch);
+  return cache.traceField;
+}
+
+function polyToPath(pts, dp){
+  let d = 'M'+pts[0].toFixed(dp)+' '+pts[1].toFixed(dp);
+  for(let i=1;i<pts.length/2;i++) d += 'L'+pts[i*2].toFixed(dp)+' '+pts[i*2+1].toFixed(dp);
+  return d;
+}
+
+function ridgePath(prof, W, sw, color){
+  const rp=[]; for(let x=0;x<W;x++) rp.push(x, prof[x]);
+  const rs = rdp(rp, 0.5);
+  return `<g id="ridge" fill="none" stroke="${color}" stroke-width="${sw.toFixed(2)}" stroke-linejoin="round" stroke-linecap="round"><path d="${polyToPath(rs,1)}"/></g>`;
+}
+
+function buildSVG(){
+  const W=img.w, H=img.h;
+  const sch = SCHEMES[state.scheme];
+  const inkA = state.accentOn ? ACCENT : sch.ink;
+  const sw = state.stroke;
+  const prof = getProfile();
+  const parts = [];
+  let stats = '';
+  parts.push(`<rect width="${W}" height="${H}" fill="${sch.bg}"/>`);
+
+  if(state.gridOn){
+    let g = `<g id="grid" stroke="${sch.grid}" stroke-width="1">`;
+    const minor = 40, major = 200;
+    for(let x=minor; x<W; x+=minor) g+=`<line x1="${x}" y1="0" x2="${x}" y2="${H}" ${x%major?'opacity="0.5"':''}/>`;
+    for(let y=minor; y<H; y+=minor) g+=`<line x1="0" y1="${y}" x2="${W}" y2="${y}" ${y%major?'opacity="0.5"':''}/>`;
+    parts.push(g+'</g>');
+  }
+
+  if(state.mode==='trace'){
+    const mag = getTraceField();
+    const cw=cache.cw, ch=cache.ch, s=W/cw;
+    const profC = resampleProfile(prof, cw);
+    for(let i=0;i<profC.length;i++) profC[i] /= s;
+    // density 1..10 -> percentile 0.97..0.79
+    const q = 0.97 - (state.density-1)*0.02;
+    const level = fieldPercentile(mag, cw, ch, profC, state.maskSky, q);
+    const polys = chainSegments(marchingSquares(mag, cw, ch, level));
+    let n=0, g=`<g id="trace" fill="none" stroke="${sch.ink}" stroke-width="${(sw*0.85).toFixed(2)}" stroke-linejoin="round" stroke-linecap="round" opacity="0.92">`;
+    const minLen = state.minFrag / s;
+    for(const p of polys){
+      const sp = rdp(p, 0.45);
+      const pieces = state.maskSky ? clipBelowProfile(sp, profC, 2) : [sp];
+      for(const pc of pieces){
+        if(pc.length<6 || polyLength(pc) < minLen) continue;
+        g += `<path d="${polyToPath(pc.map(v=>v*s),1)}"/>`;
+        n++;
+      }
+    }
+    parts.push(g+'</g>');
+    parts.push(ridgePath(prof, W, sw*1.7, inkA));
+    stats = `${n} FRAGMENTS`;
+  }
+
+  if(state.mode==='wireframe'){
+    const field = getBlurField(3);
+    const cw=cache.cw, ch=cache.ch, s=W/cw;
+    let lo=1e9, hi=-1e9;
+    for(let i=0;i<field.length;i++){ if(field[i]<lo)lo=field[i]; if(field[i]>hi)hi=field[i]; }
+    const range = Math.max(1e-6, hi-lo);
+    const relief = state.relief;
+    const lumAt = (x,y)=>{
+      const cx = Math.min(cw-1, Math.max(0, Math.round(x/s)));
+      const cy = Math.min(ch-1, Math.max(0, Math.round(y/s)));
+      return (field[cy*cw+cx]-lo)/range;
+    };
+    const sp = state.spacing, fine = 6;
+    let nLines=0;
+    let g=`<g id="mesh" fill="none" stroke="${sch.ink}" stroke-width="${(sw*0.7).toFixed(2)}" stroke-linejoin="round" opacity="0.65">`;
+    const emit = (pts)=>{ if(pts.length>=4){ g+=`<path d="${polyToPath(rdp(pts,0.4),1)}"/>`; nLines++; } };
+    if(state.maskSky){
+      // drape: rows follow the silhouette, compress toward the ridge (far), spread toward
+      // the bottom (near); luminance lifts vertices, clamped so nothing crosses the skyline
+      const gamma = 1.5, pad = H*0.04;
+      const R = Math.max(4, Math.round(H*0.9/sp));
+      const yFor = (x,t)=>{
+        const p = prof[x];
+        const base = p + (H - pad - p)*Math.pow(t, gamma);
+        const rel = relief*(1 - 0.5*t);
+        return Math.max(p, base - lumAt(x,base)*rel);
+      };
+      for(let i=0;i<R;i++){
+        const t = i/(R-1);
+        const pts=[];
+        for(let x=0; x<=W-1; x+=fine){ const xi=Math.min(W-1,x); pts.push(xi, yFor(xi,t)); }
+        emit(pts);
+      }
+      const tStep = 1/((R-1)*3);
+      for(let x=0; x<W; x+=sp){
+        const pts=[];
+        for(let t=0; t<=1+1e-9; t+=tStep) pts.push(x, yFor(x, Math.min(1,t)));
+        emit(pts);
+      }
+      parts.push(g+'</g>');
+      parts.push(ridgePath(prof, W, sw*1.7, inkA));
+    }else{
+      // full-frame relief mesh
+      for(let y=0; y<H; y+=sp){
+        const pts=[];
+        for(let x=0; x<=W-1; x+=fine){ const xi=Math.min(W-1,x); pts.push(xi, y - lumAt(xi,y)*relief); }
+        emit(pts);
+      }
+      for(let x=0; x<W; x+=sp){
+        const pts=[];
+        for(let y=0; y<H; y+=fine) pts.push(x, y - lumAt(x,y)*relief);
+        emit(pts);
+      }
+      parts.push(g+'</g>');
+    }
+    stats = `${nLines} MESH LINES`;
+  }
+
+  if(state.mode==='contours'){
+    const field = getBlurField(Math.max(1, Math.round(14 - state.detail)));
+    const cw=cache.cw, ch=cache.ch, s=W/cw;
+    const profC = resampleProfile(prof, cw);
+    for(let i=0;i<profC.length;i++) profC[i] /= s;
+    const lv = contourLevels(field, cw, ch, profC, state.levels, state.maskSky);
+    let nPaths=0, g=`<g id="contours" fill="none" stroke="${sch.ink}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round" opacity="0.85">`;
+    for(const level of lv){
+      const polys = chainSegments(marchingSquares(field, cw, ch, level));
+      for(const p of polys){
+        const sp2 = rdp(p, 0.6);
+        const pieces = state.maskSky ? clipBelowProfile(sp2, profC, 1.5) : [sp2];
+        for(const pc of pieces){
+          if(pc.length<6) continue;
+          g += `<path d="${polyToPath(pc.map(v=>v*s),1)}"/>`;
+          nPaths++;
+        }
+      }
+    }
+    parts.push(g+'</g>');
+    parts.push(ridgePath(prof, W, sw*1.7, inkA));
+    stats = `${lv.length} LEVELS · ${nPaths} PATHS`;
+  }
+
+  if(state.mode==='ridgelines'){
+    let maxP=0; for(let x=0;x<W;x++) if(prof[x]>maxP) maxP=prof[x];
+    const baseY = Math.min(H-4, maxP + (H-maxP)*0.55);
+    const lines = buildRidgelines(prof, baseY, state.count, state.decay);
+    let g=`<g id="ridgelines" fill="none" stroke="${sch.ink}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round">`;
+    for(let k=lines.length-1;k>=1;k--){
+      const t = k/(lines.length-1);
+      const pts=[]; for(let x=0;x<W;x++) pts.push(x, lines[k][x]);
+      g += `<path d="${polyToPath(rdp(pts,0.4),1)}" opacity="${(0.25+0.75*(1-t)).toFixed(2)}"/>`;
+    }
+    parts.push(g+'</g>');
+    const pts=[]; for(let x=0;x<W;x++) pts.push(x, lines[0][x]);
+    parts.push(`<g id="ridge" fill="none" stroke="${inkA}" stroke-width="${(sw*1.7).toFixed(2)}" stroke-linejoin="round" stroke-linecap="round"><path d="${polyToPath(rdp(pts,0.4),1)}"/></g>`);
+    stats = `${state.count} LINES`;
+  }
+
+  if(state.mode==='wave'){
+    const n = state.samples;
+    const rs = resampleProfile(prof, n);
+    let maxP=0, minP=1e9;
+    for(let i=0;i<n;i++){ if(rs[i]>maxP)maxP=rs[i]; if(rs[i]<minP)minP=rs[i]; }
+    const range = Math.max(1e-6, maxP-minP);
+    const midY = H/2, maxHalf = H*0.42;
+    const amp = new Float32Array(n);
+    for(let i=0;i<n;i++) amp[i] = (maxP-rs[i])/range * maxHalf;
+    parts.push(`<g id="axis" stroke="${sch.ink}" stroke-width="1" opacity="0.25"><line x1="0" y1="${midY}" x2="${W}" y2="${midY}"/></g>`);
+    if(state.waveStyle==='bars'){
+      const slot = W/n, bw = Math.max(0.75, slot*(1-state.gap));
+      let g=`<g id="wave" fill="${inkA}">`;
+      let drawn=0;
+      for(let i=0;i<n;i++){
+        const hh = amp[i];
+        if(hh<0.4) continue;
+        const x = i*slot + (slot-bw)/2;
+        g+=`<rect x="${x.toFixed(2)}" y="${(midY-hh).toFixed(2)}" width="${bw.toFixed(2)}" height="${(hh*2).toFixed(2)}"/>`;
+        drawn++;
+      }
+      parts.push(g+'</g>');
+      stats = `${n} SAMPLES · ${drawn} BARS`;
+    }else{
+      const step = W/(n-1);
+      const top=[], bot=[];
+      for(let i=0;i<n;i++){ top.push(i*step, midY-amp[i]); }
+      for(let i=n-1;i>=0;i--){ bot.push(i*step, midY+amp[i]); }
+      const d = polyToPath(top.concat(bot),1)+'Z';
+      parts.push(`<g id="wave"><path d="${d}" fill="none" stroke="${inkA}" stroke-width="${sw}" stroke-linejoin="round"/></g>`);
+      stats = `${n} SAMPLES · LINE`;
+    }
+  }
+
+  if(state.specOn){
+    const names = {trace:'TRACE', wireframe:'WIREFRAME', contours:'CONTOURS', ridgelines:'RIDGELINES', wave:'SOUNDWAVE'};
+    let spec = `TRACE 01 / ${names[state.mode]}`;
+    if(state.mode==='trace') spec += ` / DENSITY ${state.density}`;
+    if(state.mode==='wireframe') spec += ` / SPACING ${state.spacing} / RELIEF ${state.relief}`;
+    if(state.mode==='contours') spec += ` / LEVELS ${state.levels}`;
+    if(state.mode==='ridgelines') spec += ` / LINES ${state.count}`;
+    if(state.mode==='wave') spec += ` / SAMPLES ${state.samples}`;
+    spec += ` / SRC ${state.srcName.toUpperCase()}`;
+    parts.push(`<text x="16" y="${H-14}" font-family="ui-monospace,Menlo,monospace" font-size="12" fill="${sch.ink}" opacity="0.7">${spec}</text>`);
+  }
+
+  svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${parts.join('')}</svg>`;
+  return stats;
+}
+/*PIPELINE-END*/
+
+// ---------------- DOM ----------------
+const $ = (id)=>document.getElementById(id);
+let renderQueued = false;
+
+function loadBitmapToWorking(bitmap, name){
+  const scale = Math.min(1, MAXW / bitmap.width);
+  const w = Math.max(2, Math.round(bitmap.width*scale));
+  const h = Math.max(2, Math.round(bitmap.height*scale));
+  const cv = document.createElement('canvas');
+  cv.width=w; cv.height=h;
+  const ctx = cv.getContext('2d', {willReadFrequently:true});
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  img = { w, h, rgba: ctx.getImageData(0,0,w,h).data, dataURL: cv.toDataURL('image/jpeg', 0.8) };
+  state.srcName = name;
+  $('srcName').textContent = 'SRC: ' + name;
+  invalidateImage();
+  requestRender();
+}
+
+async function loadFile(file){
+  if(!file || !file.type.startsWith('image/')) return;
+  try{
+    const bmp = await createImageBitmap(file, {imageOrientation:'from-image'});
+    loadBitmapToWorking(bmp, file.name.replace(/\.[^.]+$/,''));
+  }catch(e){
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = ()=>{ loadBitmapToWorking(im, file.name.replace(/\.[^.]+$/,'')); URL.revokeObjectURL(url); };
+    im.src = url;
+  }
+}
+
+// ---- demo scene ----
+let demoSeed = 7;
+function makeDemo(){
+  demoSeed = (demoSeed*16807 + 11) % 2147483647;
+  const rnd = mulberry32(demoSeed);
+  const W=1080, H=640;
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const ctx=cv.getContext('2d');
+  const sky=ctx.createLinearGradient(0,0,0,H*0.8);
+  sky.addColorStop(0,'#C7D0DA'); sky.addColorStop(1,'#EFF1F0');
+  ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+  const layers=[
+    {base:0.46, amp:0.14, top:'#B9C2CC', bot:'#97A2AE'},
+    {base:0.60, amp:0.15, top:'#8A96A2', bot:'#657078'},
+    {base:0.74, amp:0.17, top:'#535D68', bot:'#31373E'},
+  ];
+  for(const L of layers){
+    const nz = valueNoise1d(W, 5, rnd);
+    const g = ctx.createLinearGradient(0, H*(L.base-L.amp-0.1), 0, H);
+    g.addColorStop(0, L.top); g.addColorStop(1, L.bot);
+    ctx.fillStyle=g;
+    ctx.beginPath(); ctx.moveTo(0,H);
+    for(let x=0;x<W;x++){
+      const peak = Math.abs(nz[x]);
+      ctx.lineTo(x, H*L.base - (0.35+peak)*L.amp*H);
+    }
+    ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+  }
+  const n = demoSeed%97;
+  loadBitmapToWorking(cv, 'demo-scene-'+String(n).padStart(2,'0'));
+}
+
+function requestRender(){
+  if(renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(()=>{
+    renderQueued = false;
+    if(!img.rgba) return;
+    const t0 = performance.now();
+    const stats = buildSVG();
+    const ms = Math.round(performance.now()-t0);
+    const frame = $('frame');
+    frame.innerHTML = svgString + (state.ghostOn ? `<img class="ghost" src="${img.dataURL}" alt="">` : '');
+    $('statusbar').innerHTML =
+      `<span>SRC <b>${state.srcName}</b></span>`+
+      `<span><b>${img.w}×${img.h}</b></span>`+
+      `<span>${stats}</span>`+
+      `<span>RENDER <b>${ms}MS</b></span>`;
+  });
+}
+
+// ---- exports ----
+function download(blob, name){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+}
+$('btnSvg').addEventListener('click', ()=>{
+  if(!svgString) return;
+  download(new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n'+svgString], {type:'image/svg+xml'}),
+    `trace-${state.mode}-${state.srcName}.svg`);
+});
+$('btnPng').addEventListener('click', ()=>{
+  if(!svgString) return;
+  const im = new Image();
+  const url = URL.createObjectURL(new Blob([svgString],{type:'image/svg+xml'}));
+  im.onload = ()=>{
+    const cv = document.createElement('canvas');
+    cv.width = img.w*2; cv.height = img.h*2;
+    cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height);
+    URL.revokeObjectURL(url);
+    cv.toBlob(b=>download(b, `trace-${state.mode}-${state.srcName}@2x.png`), 'image/png');
+  };
+  im.src = url;
+});
+
+// ---- controls wiring ----
+function seg(id, cb){
+  const el = $(id);
+  el.addEventListener('click', (e)=>{
+    const b = e.target.closest('button'); if(!b) return;
+    for(const x of el.querySelectorAll('button')) x.setAttribute('aria-pressed', x===b ? 'true':'false');
+    cb(b.dataset.v);
+  });
+}
+seg('segMode', v=>{
+  state.mode = v;
+  $('pTrace').hidden = v!=='trace';
+  $('pWire').hidden = v!=='wireframe';
+  $('pContours').hidden = v!=='contours';
+  $('pRidgelines').hidden = v!=='ridgelines';
+  $('pWave').hidden = v!=='wave';
+  requestRender();
+});
+seg('segAlgo', v=>{ state.algo=v; invalidateProfile(); requestRender(); });
+seg('segScheme', v=>{ state.scheme=v; requestRender(); });
+seg('segWaveStyle', v=>{ state.waveStyle=v; requestRender(); });
+
+function slider(id, valId, fmt, cb){
+  const el = $(id);
+  const show = ()=>{ $(valId).textContent = fmt(+el.value); };
+  el.addEventListener('input', ()=>{ show(); cb(+el.value); requestRender(); });
+  show();
+}
+slider('threshold','vThreshold', v=>String(v), v=>{ state.threshold=v; invalidateProfile(); });
+slider('smooth','vSmooth', v=>String(v), v=>{ state.smooth=v; invalidateProfile(); });
+slider('density','vDensity', v=>String(v), v=>{ state.density=v; });
+slider('minFrag','vMinFrag', v=>String(v), v=>{ state.minFrag=v; });
+slider('spacing','vSpacing', v=>String(v), v=>{ state.spacing=v; });
+slider('relief','vRelief', v=>String(v), v=>{ state.relief=v; });
+slider('levels','vLevels', v=>String(v), v=>{ state.levels=v; });
+slider('detail','vDetail', v=>String(v), v=>{ state.detail=v; });
+slider('count','vCount', v=>String(v), v=>{ state.count=v; });
+slider('decay','vDecay', v=>(v/10).toFixed(1), v=>{ state.decay=v/10; });
+slider('samples','vSamples', v=>String(v), v=>{ state.samples=v; });
+slider('gap','vGap', v=>String(v), v=>{ state.gap=v/100; });
+slider('stroke','vStroke', v=>(v/10).toFixed(1), v=>{ state.stroke=v/10; });
+
+function toggle(id, key, extra){
+  $(id).addEventListener('change', e=>{
+    state[key]=e.target.checked;
+    if(extra) extra();
+    requestRender();
+  });
+}
+toggle('invert','invert', ()=>{ invalidateProfile(); });
+toggle('maskSky','maskSky');
+toggle('accentOn','accentOn');
+toggle('gridOn','gridOn');
+toggle('ghostOn','ghostOn');
+toggle('specOn','specOn');
+
+$('btnLoad').addEventListener('click', ()=>$('fileInput').click());
+$('fileInput').addEventListener('change', e=>{ if(e.target.files[0]) loadFile(e.target.files[0]); e.target.value=''; });
+$('btnDemo').addEventListener('click', makeDemo);
+
+// drop + paste
+let dragDepth = 0;
+window.addEventListener('dragenter', e=>{ e.preventDefault(); dragDepth++; $('dropzone').classList.add('on'); });
+window.addEventListener('dragleave', e=>{ e.preventDefault(); if(--dragDepth<=0){ dragDepth=0; $('dropzone').classList.remove('on'); } });
+window.addEventListener('dragover', e=>e.preventDefault());
+window.addEventListener('drop', e=>{
+  e.preventDefault(); dragDepth=0; $('dropzone').classList.remove('on');
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if(f) loadFile(f);
+});
+window.addEventListener('paste', e=>{
+  const items = e.clipboardData && e.clipboardData.items;
+  if(!items) return;
+  for(const it of items){
+    if(it.type.startsWith('image/')){ loadFile(it.getAsFile()); break; }
+  }
+});
+
+makeDemo();
+</script>

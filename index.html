@@ -379,6 +379,15 @@ function medianFilter(arr, win){
   return out;
 }
 
+// Replace narrow spikes (a few columns wide) with the local median; real peaks span
+// far more columns than extraction glitches do.
+function despike(arr, win, tol){
+  const med = medianFilter(arr, win);
+  const out = arr.slice();
+  for(let i=0;i<arr.length;i++) if(Math.abs(arr[i]-med[i]) > tol) out[i] = med[i];
+  return out;
+}
+
 function smooth1d(arr, win){
   if(win<2) return arr.slice();
   const half = win>>1, n = arr.length, out = new Float32Array(n);
@@ -647,6 +656,7 @@ function getProfile(){
     prof = extractSkylineLuma(lum, img.w, img.h, state.threshold/100, 4, state.invert);
   }
   prof = fillGaps(prof);
+  prof = despike(prof, 25, 18);
   if(state.smooth>0){
     prof = medianFilter(prof, 1+2*Math.round(state.smooth/2));
     prof = smooth1d(prof, 1+2*state.smooth);
@@ -723,7 +733,11 @@ function buildSVG(){
     for(let i=0;i<profC.length;i++) profC[i] /= s;
     // density 1..10 -> percentile 0.97..0.79
     const q = 0.97 - (state.density-1)*0.02;
-    const level = fieldPercentile(mag, cw, ch, profC, state.maskSky, q);
+    let maxMag=0;
+    for(let i=0;i<mag.length;i++) if(mag[i]>maxMag) maxMag=mag[i];
+    // noise floor: gradient dither has tiny magnitude, real edges are a large
+    // fraction of max — never let the percentile land inside the dither band
+    const level = Math.max(fieldPercentile(mag, cw, ch, profC, state.maskSky, q), maxMag*0.05);
     const polys = chainSegments(marchingSquares(mag, cw, ch, level));
     let n=0, g=`<g id="trace" fill="none" stroke="${sch.ink}" stroke-width="${(sw*0.85).toFixed(2)}" stroke-linejoin="round" stroke-linecap="round" opacity="0.92">`;
     const minLen = state.minFrag / s;

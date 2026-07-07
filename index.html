@@ -302,6 +302,9 @@ function sobelMag(field, w, h){
       out[i] = Math.abs(gx) + Math.abs(gy);
     }
   }
+  // zero a 2px frame: blur clamping fabricates gradients along the borders
+  for(let x=0;x<w;x++){ out[x]=out[w+x]=out[(h-2)*w+x]=out[(h-1)*w+x]=0; }
+  for(let y=0;y<h;y++){ out[y*w]=out[y*w+1]=out[y*w+w-2]=out[y*w+w-1]=0; }
   return out;
 }
 
@@ -315,7 +318,11 @@ function extractSkylineColor(rgba, w, h, threshold, run){
       const p = (y*w+x)*4;
       const d = (Math.abs(rgba[p]-rr) + Math.abs(rgba[p+1]-rg) + Math.abs(rgba[p+2]-rb))/3;
       if(d < threshold){
-        rr += (rgba[p]-rr)*0.08; rg += (rgba[p+1]-rg)*0.08; rb += (rgba[p+2]-rb)*0.08;
+        // adapt fast while clearly sky, barely at all in the suspicious band —
+        // otherwise a soft haze boundary gets absorbed and the walk tunnels
+        // through the far ridge onto the layer behind it
+        const rate = d < threshold*0.5 ? 0.1 : 0.015;
+        rr += (rgba[p]-rr)*rate; rg += (rgba[p+1]-rg)*rate; rb += (rgba[p+2]-rb)*rate;
         continue;
       }
       let ok = true;

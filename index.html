@@ -309,29 +309,35 @@ function sobelMag(field, w, h){
 }
 
 // Adaptive per-column sky reference walk. Returns y of first non-sky pixel per column (NaN if none).
+// Detection is a confirmed look-ahead decision, not a single-pixel trigger: one antialiased or
+// dithered pixel can neither fire it nor poison the sky reference. Only clearly-sky pixels
+// (d < 0.5t) adapt the reference; a candidate (d >= 0.6t) fires when nearly all of the next
+// `run` pixels sustain d > 0.75t against the frozen reference.
 function extractSkylineColor(rgba, w, h, threshold, run){
   const prof = new Float32Array(w).fill(NaN);
   const maxY = h-1;
   for(let x=0; x<w; x++){
     let rr = rgba[x*4], rg = rgba[x*4+1], rb = rgba[x*4+2];
-    for(let y=1; y<=maxY; y++){
+    const dist = (y)=>{
       const p = (y*w+x)*4;
-      const d = (Math.abs(rgba[p]-rr) + Math.abs(rgba[p+1]-rg) + Math.abs(rgba[p+2]-rb))/3;
-      if(d < threshold){
-        // adapt fast while clearly sky, barely at all in the suspicious band —
-        // otherwise a soft haze boundary gets absorbed and the walk tunnels
-        // through the far ridge onto the layer behind it
-        const rate = d < threshold*0.5 ? 0.1 : 0.015;
-        rr += (rgba[p]-rr)*rate; rg += (rgba[p+1]-rg)*rate; rb += (rgba[p+2]-rb)*rate;
+      return (Math.abs(rgba[p]-rr) + Math.abs(rgba[p+1]-rg) + Math.abs(rgba[p+2]-rb))/3;
+    };
+    for(let y=1; y<=maxY; y++){
+      const d = dist(y);
+      if(d < threshold*0.5){
+        const p = (y*w+x)*4;
+        rr += (rgba[p]-rr)*0.1; rg += (rgba[p+1]-rg)*0.1; rb += (rgba[p+2]-rb)*0.1;
         continue;
       }
-      let ok = true;
-      for(let k=1; k<=run && y+k<=maxY; k++){
-        const q = ((y+k)*w+x)*4;
-        const dk = (Math.abs(rgba[q]-rr) + Math.abs(rgba[q+1]-rg) + Math.abs(rgba[q+2]-rb))/3;
-        if(dk < threshold*0.8){ ok=false; break; }
+      if(d >= threshold*0.6){
+        let hits = 0, seen = 0;
+        for(let k=1; k<=run && y+k<=maxY; k++){
+          seen++;
+          if(dist(y+k) > threshold*0.75) hits++;
+        }
+        if(seen>0 && hits >= seen-1){ prof[x] = y; break; }
       }
-      if(ok){ prof[x] = y; break; }
+      // suspicious but unconfirmed: hold the reference and keep walking
     }
   }
   return prof;

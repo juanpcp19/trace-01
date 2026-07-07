@@ -539,6 +539,25 @@ function polyLength(pts){
   return L;
 }
 
+// Split a polyline, keeping only runs at least `margin` away from the field borders,
+// where blur clamping fabricates level crossings.
+function clipBorder(pts, w, h, margin){
+  const n = pts.length/2, out=[];
+  let cur=null;
+  for(let i=0;i<n;i++){
+    const x=pts[i*2], y=pts[i*2+1];
+    if(x>=margin && x<=w-1-margin && y>=margin && y<=h-1-margin){
+      if(!cur) cur=[];
+      cur.push(x,y);
+    }else if(cur){
+      if(cur.length>=4) out.push(cur);
+      cur=null;
+    }
+  }
+  if(cur && cur.length>=4) out.push(cur);
+  return out;
+}
+
 // Split a polyline, keeping only runs below the skyline profile (y >= prof[x] + margin).
 function clipBelowProfile(pts, prof, margin){
   const n = pts.length/2, out=[];
@@ -837,7 +856,8 @@ function buildSVG(){
       const polys = chainSegments(marchingSquares(field, cw, ch, level));
       for(const p of polys){
         const sp2 = rdp(p, 0.6);
-        const pieces = state.maskSky ? clipBelowProfile(sp2, profC, 1.5) : [sp2];
+        let pieces = clipBorder(sp2, cw, ch, 2);
+        if(state.maskSky) pieces = pieces.flatMap(pc => clipBelowProfile(pc, profC, 1.5));
         for(const pc of pieces){
           if(pc.length<6) continue;
           g += `<path d="${polyToPath(pc.map(v=>v*s),1)}"/>`;
@@ -971,10 +991,15 @@ function makeDemo(){
     g.addColorStop(0, L.top); g.addColorStop(1, L.bot);
     ctx.fillStyle=g;
     ctx.beginPath(); ctx.moveTo(0,H);
+    let lastY = H;
     for(let x=0;x<W;x++){
       const peak = Math.abs(nz[x]);
-      ctx.lineTo(x, H*L.base - (0.35+peak)*L.amp*H);
+      lastY = H*L.base - (0.35+peak)*L.amp*H;
+      ctx.lineTo(x, lastY);
     }
+    // carry the ridge to the true canvas edge; a diagonal seam in the last
+    // column reads as real content to the extractor
+    ctx.lineTo(W, lastY);
     ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
   }
   const n = demoSeed%97;
